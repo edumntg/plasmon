@@ -1,0 +1,11 @@
+{% extends "base.html" %}{% set active = 'open' %}{% block title %}Open jobs{% endblock %}
+{% block content %}
+<div class="titlerow"><h1>Open jobs</h1><a class="button secondary" href="/machine">My machine</a></div>
+<p class="muted">Jobs running on {{ org }} that your machines could train. A job marked <em>automatic</em> is assigned to any machine that fits; a job marked <em>join</em> waits until you join it. When the owner asks for approval, you hear back by mail.</p>
+{% if result.startswith('approved:') %}<p class="ok" role="status">Joined {{ result[9:] }}. Your machine takes a round at its next heartbeat.</p>
+{% elif result.startswith('pending:') %}<p class="ok" role="status">Asked to join {{ result[8:] }}. The owner decides; you get a mail either way.</p>
+{% elif result.startswith('left:') %}<p class="ok" role="status">Left {{ result[5:] }}. The machine finishes its current round and takes no more of this job.</p>
+{% elif result.startswith('error:') %}<p class="error" role="alert">{{ result[6:] }}</p>{% endif %}
+<div hx-get="/partials/jobs-open" hx-trigger="every 10s" hx-swap="innerHTML">{% include "partials/jobs_open_table.html" %}</div>
+<p class="muted small">From a terminal: <code>plasmon job open</code> · <code>plasmon trainer join &lt;job&gt;</code> · <code>plasmon trainer leave &lt;job&gt;</code></p>
+{% endblock %}

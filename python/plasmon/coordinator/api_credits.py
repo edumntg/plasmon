@@ -20,13 +20,23 @@ def entry_out(e: db.CreditEntry) -> dict:
     return {"id": e.id, "at": e.at, "amount": e.amount, "kind": e.kind, "job_id": e.job_id, "round": e.round_index, "machine_id": e.machine_id, "memo": e.memo}
 
 
+def hold_out(h: db.Hold, job_names: dict[str, str]) -> dict:
+    return {"id": h.id, "at": h.created_at, "job_id": h.job_id, "job": job_names.get(h.job_id, h.job_id), "round": h.round_index, "machine_id": h.machine_id, "amount": h.amount, "status": h.status, "released_at": h.released_at}
+
+
 @router.get("/me")
 def me(limit: int = 100, user: db.User = Depends(current_user), session: Session = Depends(get_session), state=Depends(get_state)):
+    holds = credits.holds_for(session, user.id, limit)
+    names = {j.id: j.name for j in session.scalars(select(db.Job).where(db.Job.id.in_({h.job_id for h in holds}))).all()} if holds else {}
     return {
         "enabled": state.cfg.credits.enabled,
         "unit": state.cfg.credits.unit,
+        "fee_pct": state.cfg.credits.fee_pct,
         "balance": credits.balance(session, user.id),
+        "on_hold": credits.on_hold(session, user.id),
+        "locked": credits.locked(session, user.id),
         "entries": [entry_out(e) for e in credits.entries_for(session, user.id, limit)],
+        "holds": [hold_out(h, names) for h in holds],
     }
 
 

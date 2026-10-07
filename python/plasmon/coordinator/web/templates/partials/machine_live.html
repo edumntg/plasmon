@@ -18,6 +18,8 @@
   {% if met.on_battery is defined %}<div class="card stat rise" style="--i: 7"><div class="label">power</div><div class="value">{% if met.on_battery %}{{ met.battery_pct|int }}<small> % battery</small>{% else %}plugged in{% endif %}</div></div>{% endif %}
   <div class="card stat rise" style="--i: 8"><div class="label">this session</div><div class="value" data-live="sr">{{ met.session_rounds|default(0) }}<small> rounds</small></div><div class="meta">{{ met.session_samples|default(0)|num }} samples</div></div>
   <div class="card stat rise" style="--i: 9"><div class="label">all time</div><div class="value">{{ m.rounds_served }}<small> rounds</small></div><div class="meta">{{ m.samples_verified|num }} samples verified · honesty {{ '%.2f'|format(m.honesty) }}</div></div>
+  {% if m.hardware and m.hardware.tflops %}<div class="card stat rise" style="--i: 10"><div class="label">throughput</div><div class="value">{{ m.hardware.tflops }}<small> TFLOPS</small></div><div class="meta">matmul, measured at trainer start</div></div>{% endif %}
+  {% if held %}<div class="card stat rise" style="--i: 11"><div class="label">on hold</div><div class="value" data-live="held">{{ held|num }}</div><div class="meta">credits released when the jobs end</div></div>{% endif %}
 </div>
 <h2>Recent rounds</h2>
 {% if recent %}

@@ -6,6 +6,7 @@
 | `cifar10/` | `cifar_cnn`, 0.8M parameters | CIFAR-10, 32×32 colour | 163 MB | 5 to 15 minutes |
 | `shakespeare/` | `char_lm`, 0.8M parameters | Shakespeare as bytes | 1.1 MB | 3 to 7 minutes |
 | `local-network/` | scripts for a server and trainers on one Wi-Fi | | | |
+| `marketplace/` | `mnist_cnn` with funding, join mode, owner approval and sealed shards | MNIST | 11 MB | needs credits on (see docs/MARKETPLACE.md) |
 
 Submit any job file with `plasmon job submit <file>`, or paste it into the dashboard.
 `cifar10/` has a pair of files to compare one trainer with two.

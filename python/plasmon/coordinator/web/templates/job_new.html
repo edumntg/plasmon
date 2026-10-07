@@ -1,7 +1,20 @@
 {% extends "base.html" %}{% set active = 'jobs' %}{% block title %}Submit a job{% endblock %}
 {% block content %}
 <h1>Submit a job</h1>
-<p class="muted">The same <code>job.yaml</code> the command line uses. The server prepares the shards, so the dataset must be <code>builtin://mnist</code> or a directory the server can read. For a dataset on your own computer use <code>plasmon job submit</code>.</p>
+<p class="muted">The same <code>job.yaml</code> the command line uses. The server prepares the shards, so the dataset must be <code>builtin://mnist</code> or a directory the server can read. For a dataset on your own computer use <code>plasmon job submit</code>, which also seals the shards before they leave your machine when <code>privacy.encrypt_shards</code> is on.</p>
+<details class="hint">
+  <summary>Funding, who trains, and data exposure</summary>
+  <pre><code>enrolment:
+  mode: join            # auto: any idle machine that fits; join: trainers pick it from Open jobs
+  approval: owner       # none, or owner: you approve each machine (you get a mail)
+privacy:
+  encrypt_shards: true  # shards sealed with a key only assigned machines receive
+  sticky_shards: true   # a machine keeps the shards it already saw
+  max_shards_per_machine: 4
+budget:
+  rounds: 20
+  funding: 2000         # credits locked now; 100 per round on hold, released at the end</code></pre>
+</details>
 {% if error %}<p class="error" role="alert">{{ error }}</p>{% endif %}
 <form method="post" action="/jobs/new" class="stack wide">
   <label>Job specification<textarea name="yaml_text" rows="24" spellcheck="false" required>{{ yaml_text }}</textarea></label>

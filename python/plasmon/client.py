@@ -117,6 +117,25 @@ class Client:
     def cancel_job(self, job_id: str) -> dict:
         return self.post(f"/v1/jobs/{job_id}/cancel")
 
+    # open jobs and enrolment
+    def open_jobs(self) -> list[dict]:
+        return self.get("/v1/jobs/open")
+
+    def join_job(self, job_id: str, node_id: str | None = None) -> dict:
+        return self.post(f"/v1/jobs/{job_id}/join", {"node_id": node_id})
+
+    def leave_job(self, job_id: str, node_id: str | None = None) -> dict:
+        return self.post(f"/v1/jobs/{job_id}/leave", {"node_id": node_id})
+
+    def job_enrolments(self, job_id: str) -> list[dict]:
+        return self.get(f"/v1/jobs/{job_id}/enrolments")
+
+    def approve(self, job_id: str, machine: str, note: str = "") -> dict:
+        return self.post(f"/v1/jobs/{job_id}/enrolments/{machine}/approve", {"note": note})
+
+    def reject(self, job_id: str, machine: str, note: str = "") -> dict:
+        return self.post(f"/v1/jobs/{job_id}/enrolments/{machine}/reject", {"note": note})
+
     # machines
     def register_machine(self, body: dict) -> dict:
         return self.post("/v1/machines/register", body)

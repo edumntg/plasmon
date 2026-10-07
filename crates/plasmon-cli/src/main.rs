@@ -138,6 +138,27 @@ enum JobCmd {
     Cancel {
         id: String,
     },
+    /// Running jobs a trainer can join: pay, requirements, who approves.
+    Open,
+    /// Machines that asked to train a job of yours.
+    Approvals {
+        id: String,
+    },
+    /// Let a machine train your job.
+    Approve {
+        id: String,
+        /// Machine name, node id or its prefix.
+        machine: String,
+        #[arg(long, default_value = "")]
+        note: String,
+    },
+    /// Keep a machine off your job.
+    Reject {
+        id: String,
+        machine: String,
+        #[arg(long, default_value = "")]
+        note: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -234,6 +255,19 @@ enum TrainerCmd {
         hours: Vec<String>,
         #[arg(long)]
         never_on_battery: bool,
+    },
+    /// Offer this machine to one open job (see `plasmon job open`).
+    Join {
+        job: String,
+        /// Another machine of yours: name, node id or its prefix. Default: this machine.
+        #[arg(long)]
+        machine: Option<String>,
+    },
+    /// Take this machine off a job.
+    Leave {
+        job: String,
+        #[arg(long)]
+        machine: Option<String>,
     },
     /// Run the trainer at login as a user service (systemd, launchd or a scheduled task).
     Enable {
@@ -339,6 +373,14 @@ fn run() -> Result<i32> {
                 commands::job_download(server, &id, output.as_deref()).map(|_| 0)
             }
             JobCmd::Cancel { id } => commands::job_cancel(server, &id).map(|_| 0),
+            JobCmd::Open => commands::job_open(server, cli.json).map(|_| 0),
+            JobCmd::Approvals { id } => commands::job_approvals(server, &id, cli.json).map(|_| 0),
+            JobCmd::Approve { id, machine, note } => {
+                commands::job_decide(server, &id, &machine, true, &note, cli.json).map(|_| 0)
+            }
+            JobCmd::Reject { id, machine, note } => {
+                commands::job_decide(server, &id, &machine, false, &note, cli.json).map(|_| 0)
+            }
         },
         Some(Command::Trainer { cmd }) => match cmd {
             TrainerCmd::Start {
@@ -374,6 +416,13 @@ fn run() -> Result<i32> {
                     tui::intro_inline(&format!("trainer · {target} · Ctrl-C stops"))?;
                 }
                 python::run(&with_server_vec(server, args, false))
+            }
+            TrainerCmd::Join { job, machine } => {
+                commands::trainer_enrol(server, &job, machine.as_deref(), true, cli.json).map(|_| 0)
+            }
+            TrainerCmd::Leave { job, machine } => {
+                commands::trainer_enrol(server, &job, machine.as_deref(), false, cli.json)
+                    .map(|_| 0)
             }
             TrainerCmd::Enable { args } => {
                 let mut full = vec!["trainer".to_string(), "enable".to_string()];

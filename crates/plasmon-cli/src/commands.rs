@@ -758,6 +758,229 @@ pub fn policy_show(server: Option<&str>, json: bool) -> Result<()> {
     Ok(())
 }
 
+// ----- open jobs and enrolment -----------------------------------------------------------
+
+fn pays(j: &Value) -> String {
+    if j["funding"].as_i64().unwrap_or(0) > 0 {
+        format!("{}/round of {}", j["per_round"], j["funding"])
+    } else if j["credits_per_1k_samples"].as_f64().unwrap_or(0.0) > 0.0 {
+        format!("{}/1k samples", num(&j["credits_per_1k_samples"]))
+    } else {
+        "reputation".to_string()
+    }
+}
+
+fn needs(req: &Value) -> String {
+    let mut parts = Vec::new();
+    if req["device"].as_str().unwrap_or("any") != "any" {
+        parts.push(s(&req["device"]));
+    }
+    if req["min_vram_gb"].as_f64().unwrap_or(0.0) > 0.0 {
+        parts.push(format!("{} GB VRAM", num(&req["min_vram_gb"])));
+    }
+    if req["min_tflops"].as_f64().unwrap_or(0.0) > 0.0 {
+        parts.push(format!("{} TFLOPS", num(&req["min_tflops"])));
+    }
+    if req["min_honesty"].as_f64().unwrap_or(0.0) > 0.0 {
+        parts.push(format!("honesty {}", num(&req["min_honesty"])));
+    }
+    if parts.is_empty() {
+        "any machine".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+pub fn enrolment_label(j: &Value) -> String {
+    let mut label = s(&j["enrolment"]["mode"]);
+    if j["enrolment"]["approval"] == "owner" {
+        label.push_str(" + approval");
+    }
+    label
+}
+
+pub fn mine_label(j: &Value) -> String {
+    let parts: Vec<String> = arr_of(&j["mine"])
+        .iter()
+        .map(|m| format!("{}: {}", s(&m["name"]), s(&m["standing"])))
+        .collect();
+    if parts.is_empty() {
+        "-".to_string()
+    } else {
+        parts.join(", ")
+    }
+}
+
+fn arr_of(v: &Value) -> &[Value] {
+    v.as_array().map(Vec::as_slice).unwrap_or(&[])
+}
+
+pub fn open_job_row(j: &Value) -> Vec<String> {
+    vec![
+        s(&j["id"]),
+        s(&j["name"]),
+        s(&j["owner"]),
+        pays(j),
+        needs(&j["requirements"]),
+        enrolment_label(j),
+        format!("{}/{}", j["round"], j["total_rounds"]),
+        j["trainers_now"].to_string(),
+        mine_label(j),
+    ]
+}
+
+pub const OPEN_HEADERS: [&str; 9] = [
+    "id",
+    "name",
+    "owner",
+    "pays",
+    "needs",
+    "enrolment",
+    "round",
+    "trainers",
+    "your machines",
+];
+
+pub fn job_open(server: Option<&str>, json: bool) -> Result<()> {
+    let api = api(server)?;
+    let jobs = api.get("/v1/jobs/open")?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&jobs)?);
+        return Ok(());
+    }
+    let rows: Vec<Vec<String>> = arr_of(&jobs).iter().map(open_job_row).collect();
+    if rows.is_empty() {
+        println!("no job is running");
+    } else {
+        print!("{}", table(&OPEN_HEADERS, &rows));
+        println!("\njoin one with: plasmon trainer join <id>");
+    }
+    Ok(())
+}
+
+pub fn job_approvals(server: Option<&str>, id: &str, json: bool) -> Result<()> {
+    let api = api(server)?;
+    let rows_v = api.get(&format!("/v1/jobs/{id}/enrolments"))?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&rows_v)?);
+        return Ok(());
+    }
+    let rows: Vec<Vec<String>> = arr_of(&rows_v)
+        .iter()
+        .map(|e| {
+            vec![
+                s(&e["machine"]),
+                s(&e["status"]),
+                s(&e["owner"]),
+                s(&e["hardware_text"]),
+                if e["tflops"].is_null() {
+                    "-".to_string()
+                } else {
+                    num(&e["tflops"])
+                },
+                e["honesty"]
+                    .as_f64()
+                    .map(|v| format!("{v:.2}"))
+                    .unwrap_or_default(),
+                e["rounds_served"].to_string(),
+                ago(&e["requested_at"]),
+                s(&e["note"]),
+            ]
+        })
+        .collect();
+    if rows.is_empty() {
+        println!("no machine has asked to join this job");
+        return Ok(());
+    }
+    print!(
+        "{}",
+        table(
+            &[
+                "machine", "status", "owner", "hardware", "tflops", "honesty", "rounds", "asked",
+                "note"
+            ],
+            &rows
+        )
+    );
+    let pending = arr_of(&rows_v)
+        .iter()
+        .filter(|e| e["status"] == "pending")
+        .count();
+    if pending > 0 {
+        println!(
+            "\n{pending} waiting: plasmon job approve {id} <machine>   or   plasmon job reject {id} <machine>"
+        );
+    }
+    Ok(())
+}
+
+pub fn job_decide(
+    server: Option<&str>,
+    id: &str,
+    machine: &str,
+    approve: bool,
+    note: &str,
+    json: bool,
+) -> Result<()> {
+    let api = api(server)?;
+    let verb = if approve { "approve" } else { "reject" };
+    let out = api.post(
+        &format!("/v1/jobs/{id}/enrolments/{machine}/{verb}"),
+        &serde_json::json!({"note": note}),
+    )?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+    } else {
+        println!(
+            "{} {} for job {id}{}",
+            s(&out["machine"]),
+            s(&out["status"]),
+            if approve {
+                "; it takes a round at its next heartbeat"
+            } else {
+                ""
+            }
+        );
+    }
+    Ok(())
+}
+
+pub fn trainer_enrol(
+    server: Option<&str>,
+    job: &str,
+    machine: Option<&str>,
+    join: bool,
+    json: bool,
+) -> Result<()> {
+    let api = api(server)?;
+    let node = match machine {
+        Some(m) => Some(m.to_string()),
+        None => {
+            let key = paths::machine_key();
+            key.exists()
+                .then(|| plasmon_core::identity::Identity::load(&key).map(|i| i.node_id()))
+                .transpose()?
+        }
+    };
+    let verb = if join { "join" } else { "leave" };
+    let out = api.post(
+        &format!("/v1/jobs/{job}/{verb}"),
+        &serde_json::json!({"node_id": node}),
+    )?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&out)?);
+        return Ok(());
+    }
+    let machine_name = s(&out["machine"]);
+    match out["status"].as_str().unwrap_or("") {
+        "approved" => println!("{machine_name} joined job {job}; it takes a round at its next heartbeat"),
+        "pending" => println!("{machine_name} asked to join job {job}; the owner decides and you get a mail either way"),
+        "left" => println!("{machine_name} left job {job}; it finishes its current round and takes no more"),
+        other => println!("{machine_name}: {other}"),
+    }
+    Ok(())
+}
+
 // ----- credits (M6) ------------------------------------------------------------------
 
 pub fn credits_me(server: Option<&str>, json: bool) -> Result<()> {

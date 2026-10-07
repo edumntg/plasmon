@@ -381,6 +381,7 @@ pub fn link(url: &str) -> String {
 struct Data {
     me: Value,
     jobs: Value,
+    open: Value,
     fleet: Value,
     summary: Value,
     server: Value,
@@ -499,6 +500,9 @@ impl<'a> Dash<'a> {
         }
         if matches!(self.view, View::Tab(Tab::Server) | View::Tab(Tab::Overview)) {
             self.data.server = api.get("/v1/server/status").unwrap_or(Value::Null);
+        }
+        if matches!(self.view, View::Tab(Tab::Jobs)) {
+            self.data.open = api.get("/v1/jobs/open").unwrap_or(Value::Null);
         }
         match &self.view {
             View::Job(id) => {
@@ -1093,6 +1097,73 @@ impl<'a> Dash<'a> {
     }
 
     fn draw_jobs(&mut self, f: &mut Frame, area: Rect) {
+        // The open-jobs table answers "what could my machine train?"; it shares the tab with the
+        // jobs list because both are the same marketplace seen from the two sides.
+        let n_open = arr(&self.data.open).len() as u16;
+        let open_h = (n_open + 3).clamp(4, area.height.saturating_sub(6) / 2);
+        let parts = Layout::vertical([Constraint::Min(6), Constraint::Length(open_h)]).split(area);
+        self.draw_jobs_table(f, parts[0]);
+        self.draw_open_jobs(f, parts[1]);
+    }
+
+    fn draw_open_jobs(&self, f: &mut Frame, area: Rect) {
+        let rows: Vec<Row> = arr(&self.data.open)
+            .iter()
+            .map(|j| {
+                let cells = crate::commands::open_job_row(j);
+                Row::new(vec![
+                    Cell::from(Span::styled(cells[1].clone(), bold())),
+                    Cell::from(Span::styled(cells[2].clone(), muted())),
+                    Cell::from(cells[3].clone()),
+                    Cell::from(cells[4].clone()),
+                    Cell::from(cells[5].clone()),
+                    Cell::from(cells[6].clone()),
+                    Cell::from(cells[7].clone()),
+                    Cell::from(Span::styled(cells[8].clone(), accent())),
+                ])
+            })
+            .collect();
+        let empty = rows.is_empty();
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Length(20),
+                Constraint::Length(22),
+                Constraint::Length(18),
+                Constraint::Length(22),
+                Constraint::Length(16),
+                Constraint::Length(8),
+                Constraint::Length(9),
+                Constraint::Min(14),
+            ],
+        )
+        .header(
+            Row::new([
+                "open job",
+                "owner",
+                "pays",
+                "needs",
+                "enrolment",
+                "round",
+                "trainers",
+                "your machines",
+            ])
+            .style(muted()),
+        )
+        .block(section(" open jobs · plasmon trainer join <id> "));
+        f.render_widget(table, area);
+        if empty {
+            f.render_widget(
+                Paragraph::new(Span::styled(
+                    "No job is running. One in automatic mode reaches your machines on its own.",
+                    muted(),
+                )),
+                Rect::new(area.x + 2, area.y + 2, area.width.saturating_sub(4), 1),
+            );
+        }
+    }
+
+    fn draw_jobs_table(&mut self, f: &mut Frame, area: Rect) {
         let sel = self.jobs_state.selected();
         let rows: Vec<Row> = arr(&self.data.jobs)
             .iter()
@@ -1894,6 +1965,11 @@ mod tests {
             losses: [("job_1".to_string(), vec![1.2, 0.8, 0.41])]
                 .into_iter()
                 .collect(),
+            open: serde_json::json!([
+                {"id": "job_2", "name": "llm-es", "owner": "r.vega@example.com", "funding": 2000, "per_round": 100, "credits_per_1k_samples": 0,
+                 "requirements": {"device": "cuda", "min_vram_gb": 12, "min_tflops": 20, "min_honesty": 0}, "enrolment": {"mode": "join", "approval": "owner"},
+                 "round": 4, "total_rounds": 20, "trainers_now": 3, "mine": [{"name": "eduardo-mbp", "standing": "can join"}]}
+            ]),
             jobs,
             fleet,
         }

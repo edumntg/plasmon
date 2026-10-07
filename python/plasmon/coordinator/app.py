@@ -53,8 +53,8 @@ class State:
         self.session_factory = db.make_session_factory(self.engine_db)
         self.blobs = make_store(cfg)
         self.bus = Bus()
-        self.notifier = notify.Notifier(cfg.webhooks, cfg.public_url or "")
-        self.engine = Engine(self.blobs, self.bus, self.server, cfg.policy.heartbeat_interval_s, cfg.retention, cfg.scoring, self.notifier, cfg.credits, idle_poll_interval_s=cfg.policy.idle_poll_interval_s)
+        self.notifier = notify.Notifier(cfg.webhooks, cfg.public_url or "", cfg.email)
+        self.engine = Engine(self.blobs, self.bus, self.server, cfg.policy.heartbeat_interval_s, cfg.retention, cfg.scoring, self.notifier, cfg.credits, idle_poll_interval_s=cfg.policy.idle_poll_interval_s, public_url=self.public_url())
         self.oidc = oidc.Provider(cfg.oidc) if cfg.oidc.enabled else None
         self.sessions = CookieSessions(cfg.auth.session_secret)
         self.scheduler: Scheduler | None = None

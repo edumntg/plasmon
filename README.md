@@ -131,18 +131,28 @@ recipe:
   mixed_precision: bf16
 requirements:
   min_vram_gb: 12
+  min_tflops: 20                               # today: matmul throughput measured at trainer start
+  min_honesty: 0.8                             # today: reputation floor, see §3.5
   min_upload_mbps: 20
   min_trainers: 8
   max_trainers: 64
+enrolment:
+  mode: join                                   # today: auto (any idle machine that fits) or join (trainers pick it from the open jobs)
+  approval: owner                              # today: none, or owner (the requester approves each machine, by mail or on the job page)
+privacy:
+  encrypt_shards: true                         # today: shards sealed on the requester's machine; the key travels only with an assignment
+  sticky_shards: true                          # today: a machine keeps the shards it already saw
+  max_shards_per_machine: 4
 budget:
-  max_credits: 5000
-  price_per_verified_token: 1.0e-6
+  rounds: 200
+  funding: 500000                              # today: credits locked at submission, funding/rounds held per round, released when the job ends
   deadline: 2026-11-15T00:00:00Z
 ```
 
 The coordinator validates the spec, computes a content hash of model and dataset, converts
 the dataset into fixed-size shards stored in object storage, and opens the job for
-enrolment when the deposit is locked.
+enrolment when the deposit is locked. [docs/MARKETPLACE.md](docs/MARKETPLACE.md) walks
+through funding, enrolment, approval and data privacy as they work today.
 
 ### 3.2 Node identity and enrolment
 
@@ -236,8 +246,18 @@ problems of the whole field (§10).
 
 - Unit of account: **credits**, 1 credit = 1 USD-cent equivalent. Requesters buy credits
   (card / USDC); trainers withdraw credits (USDC, or fiat payout in later phases).
-- Per round, the job pays `price_per_verified_token × Σ tokens_i` for the top-G trainers,
-  split by `score_i × tokens_i`. A 5–10 % protocol fee funds validators and infrastructure.
+- A requester funds a job up front: `budget.funding` is locked when the job is submitted.
+  Every round sets aside `funding / rounds`: the protocol fee for the fee account, the rest
+  for the trainers whose updates were accepted, split by `score_i × samples_i`. The amounts
+  stay **on hold** until the job ends; then they are released in one settlement, the fee is
+  charged, unspent funding returns to the requester, and the requester can download the
+  weights. A job cancelled early pays the rounds that closed and refunds the rest; a job
+  the server failed pays the trainers and waives the fee. A job can instead pay per round
+  (`budget.credits_per_1k_samples`), which charges the requester as rounds close.
+- A machine earns in proportion to verified contribution: one share per accepted update,
+  so a farm that runs one trainer per GPU takes that many shares per round, a machine that
+  misses the deadline earns nothing for the round, and an update that fails verification
+  earns nothing and costs honesty.
 - Phase 1 and 2 ledger: an **append-only, hash-chained, signed log** published by the
   coordinator (each entry references the previous entry's hash; anyone can audit; the
   coordinator cannot rewrite history without detection). This is "blockchain-shaped"
@@ -258,9 +278,17 @@ inside a container with no network access, a read-only filesystem, and GPU-only
 capabilities (Docker with `--gpus`, seccomp profile, later gVisor), and is signed by the
 requester.
 
-Dataset privacy: shards are visible to every trainer that gets them. plasmon v1 is for
-**public or licensable data only**; private-data training is a federated-learning problem
-(see Flower in §10) and is out of scope.
+Dataset privacy: a trainer computes on the samples it receives, so **a machine that trains
+a shard sees that shard in clear**; no scheme that runs on consumer GPUs changes that.
+What plasmon bounds is who sees data, how much, and where it sits in clear:
+`privacy.encrypt_shards` seals the shards on the requester's machine so the blob store
+holds ciphertext and only an assigned machine gets the key; `enrolment.approval: owner`
+lets the requester approve each machine, with its hardware, reputation and owner in front
+of them; `privacy.sticky_shards` and `privacy.max_shards_per_machine` keep each machine on
+a few shards instead of a new one every round; and the job page reports which machine saw
+which shards. Data that no trainer may see needs attested enclaves (datacenter GPUs, not
+supported yet) or features from a frozen encoder computed on the requester's side.
+[docs/MARKETPLACE.md](docs/MARKETPLACE.md) states the limits plainly.
 
 ## 4. Architecture
 
@@ -450,8 +478,11 @@ plasmon init                                                 create this machine
 
 plasmon job submit job.yaml                                  validate, hash, estimate cost, confirm, submit
 plasmon job list | status <id> | logs <id> --follow | cancel <id> | download <id> [--round N]
+plasmon job open                                             running jobs a trainer can join: pay, requirements, who approves
+plasmon job approvals <id> | approve <id> <machine> | reject <id> <machine>   the machines that asked to train your job
 
 plasmon trainer start [--gpus 0,1] [--job <id> | --any] [--max-hours 8]
+plasmon trainer join <job> | leave <job> [--machine <name>]  offer a machine to one open job, or take it off
 plasmon trainer status | stop | earnings
 
 plasmon validator start | status
@@ -530,7 +561,8 @@ live in the CLI too (§5.4).
 
 ```
 Overview      everyone      the network at a glance: machines online, jobs running, rounds/h, loss curves of active jobs
-Jobs          everyone      my jobs (Member) · all jobs (Admin): status, loss, rounds, spend, ETA, trainers per round
+Jobs          everyone      my jobs (Member) · all jobs (Admin): status, loss, rounds, spend, ETA, trainers per round, requests to approve, payouts, data exposure
+Open jobs     everyone      running jobs a trainer can join: pay per round, requirements, enrolment, the standing of my machines, join
 My machine    everyone      the PC I am offering: live status, what it is training, usage, schedule, earnings, logs
 Fleet         Admin/Op      all machines: table, detail per machine, metrics, logs, actions
 Server        Admin/Op      coordinator health, round timings, queues, storage, DB, SSE clients, version
@@ -1012,7 +1044,8 @@ plasmon/
 ├── examples/                     # mnist job and eval script; local-network scripts (server, join, submit)
 ├── scripts/                      # start-up budget, vector generation
 └── docs/
-    ├── PROTOCOL.md               # wire formats: identity, canonical JSON, frames, commit-reveal
+    ├── PROTOCOL.md               # wire formats: identity, canonical JSON, frames, commit-reveal, sealed shards
+    ├── MARKETPLACE.md            # funded jobs, open jobs, approval, what private data gets and does not get
     ├── QUICKSTART.md             # one machine: run the server, connect, train
     ├── LOCAL-NETWORK.md          # one server, many participants on the same Wi-Fi
     ├── HOME-LAB.md               # two machines at home (Mac + Windows), MNIST end to end
@@ -1059,6 +1092,16 @@ plasmon/
       `plasmon credits`, jobs stop when the owner runs out. Not done: Stripe or USDC
       on-ramps and payouts, plans, invoices, LoRA jobs, staked community validators, P2P
       seeding.
+- [x] **M6a Marketplace.** Funded jobs: funding locked at submission, one hold per round
+      split by verified contribution, release, fee and refund in a settlement when the job
+      ends, weights released with the holds. Open jobs page and `plasmon job open`; `join`
+      enrolment mode and owner approval with mail to the requester (hardware, measured
+      TFLOPS, reputation, owner) and to the machine's owner; `min_tflops` and
+      `min_honesty` requirements. Private data: sealed shards with a per-job key that
+      travels only with an assignment, sticky shards, an exposure cap per machine, and an
+      exposure report on the job page. Mail over SMTP or into an outbox directory.
+      Columns added to an existing database on start. Not done: an on-ramp for credits,
+      attested enclaves, removing an approved machine mid-round.
 - [ ] **M6b Payments.** Card and USDC on-ramps, payouts, plans and invoices on top of the
       credit ledger. (Phase 2.)
 - [ ] **M7 Contracts and quorum coordinator.** (Phase 3.)
