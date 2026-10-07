@@ -94,8 +94,11 @@ def _machine(base: str, user: Client, name: str, tflops: float | None = None) ->
     return Client(base, out["machine_token"]), ident.node_id
 
 
-def _mails(outbox: Path) -> list:
-    return sorted((message_from_bytes(p.read_bytes(), policy=policy.default) for p in outbox.glob("*.eml")), key=lambda m: m["Date"] or "")
+def _mails(outbox: Path, subject: str | None = None) -> list:
+    """Outbox mails in the order they were written (the file name carries time and sequence),
+    optionally only those with one subject."""
+    out = [message_from_bytes(p.read_bytes(), policy=policy.default) for p in sorted(outbox.glob("*.eml"))]
+    return [m for m in out if subject is None or m["Subject"] == subject]
 
 
 def test_join_mode_open_list_and_leave(market, dataset_dir):
@@ -171,9 +174,8 @@ def test_owner_approval_by_mail_and_page(market, dataset_dir):
         if len(list(outbox.glob("*.eml"))) >= before + 1:
             break
         time.sleep(0.1)
-    mails = _mails(outbox)[before:]
+    mails = _mails(outbox, "plasmon: fast-box asks to train approve-me")
     assert len(mails) == 1 and mails[0]["To"] == "approver@market.test"
-    assert mails[0]["Subject"] == "plasmon: fast-box asks to train approve-me"
     body = mails[0].get_content()
     assert "82.6 TFLOPS" in body and "RTX 4090" in body and node_fast in body and f"plasmon job approve {job['id']} fast-box" in body
 
@@ -183,8 +185,8 @@ def test_owner_approval_by_mail_and_page(market, dataset_dir):
     assigned = fast.heartbeat(IDLE)["assignment"]
     assert assigned is not None and assigned["job_id"] == job["id"]
     assert fast.heartbeat({**IDLE, "status": "training", "job_id": job["id"], "round": 0})["enrolments"] == []
-    approved_mail = [m for m in _mails(outbox)[before:] if m["To"] == "gpu-farm@market.test"]
-    assert approved_mail and approved_mail[-1]["Subject"] == "plasmon: fast-box approved for approve-me" and "welcome" in approved_mail[-1].get_content()
+    approved_mail = _mails(outbox, "plasmon: fast-box approved for approve-me")
+    assert len(approved_mail) == 1 and approved_mail[0]["To"] == "gpu-farm@market.test" and "welcome" in approved_mail[0].get_content()
 
     # a rejected machine stays off the job and cannot ask again
     other, node_other = _machine(base, lender, "other-box", tflops=60)
