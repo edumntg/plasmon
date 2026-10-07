@@ -98,9 +98,24 @@ Dial: ENERGY 2 / RHYTHM 2 / MOTION 2.
 
 - Overview: the network diagram, then the machines-online card.
 - Jobs: the loss curve of the opened job; the job diagram shows the round in progress.
-- My machine: the status line ("training mnist-home for you, round 12").
+- Open jobs: the "your machines" column, where the join decision is made. The table
+  puts pay and requirements before progress because that is the order a trainer
+  compares jobs in.
+- Job page, Trainers section: the pending requests come first with the Approve button,
+  because they are the one thing waiting on the owner. Approved and rejected machines
+  follow as a quieter table.
+- My machine: the status line ("training mnist-home for you, round 12"), then the
+  standing on each job (joined, waiting, not accepted) with the one action each allows.
 - Fleet: the diagram, then the status totals.
 - Server: the scheduler state and the ledger head.
+
+Enrolment and hold standings use the status scale, always with the word: pending and held
+are yellow (waiting on someone), approved and released green, rejected and voided red,
+left grey. No new colour was added for the marketplace.
+
+A control that cannot act is not drawn: while a funded job runs, the weights are not
+downloadable, so the page shows the sentence that says when they will be, not a disabled
+button.
 
 ## Copy
 

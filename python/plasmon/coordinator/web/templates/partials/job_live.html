@@ -5,17 +5,64 @@
   <div class="card stat"><div class="label">eval loss</div><div class="value" data-live="loss">{{ job.last_eval_loss|f3 or '–' }}</div><div class="meta">on the held-out shard</div></div>
   <div class="card stat"><div class="label">accuracy</div><div class="value" data-live="acc">{{ job.last_eval_acc|pct or '–' }}</div><div class="meta">{{ job.param_count|num }} parameters</div></div>
   <div class="card stat"><div class="label">data</div><div class="value">{{ job.shards|length }}<small> shards</small></div><div class="meta">{{ job.spec.dataset.shard_size|num }} samples each{% if job.credits_spent %} · {{ job.credits_spent|num }} credits{% endif %}</div></div>
+  {% if job.funding %}
+  <div class="card stat"><div class="label">funding</div><div class="value" data-live="held">{{ job.held|num }}<small> / {{ job.funding|num }}</small></div><div class="meta">{% if job.settlement %}{{ job.settlement.paid|num }} paid · {{ job.settlement.fee|num }} fee · {{ job.settlement.refund|num }} refunded{% else %}on hold for trainers · {{ per_round|num }} per round{% endif %}</div></div>
+  {% endif %}
 </div>
 <div class="chart card" id="loss-chart" data-series='{{ series|tojson }}' role="img" aria-label="Evaluation loss and accuracy per round">
   {% if not series.rounds %}<p class="empty">The chart appears after the first round closes.</p>{% endif %}
 </div>
+{% if job.settlement %}
+<h2>Payouts</h2>
+<p class="muted">The job {{ job.settlement.outcome }}. {{ job.settlement.paid|num }} credits went to the machines that trained it, {{ job.settlement.fee|num }} to the fee account{% if job.settlement.refund %}, and {{ job.settlement.refund|num }} returned to the owner{% endif %}.</p>
+{% if job.settlement.payouts %}
+<table><thead><tr><th>machine</th><th class="num">rounds</th><th class="num">credits</th></tr></thead>
+<tbody>{% for pay in job.settlement.payouts %}<tr><td>{% if show_names %}<a href="/machine/{{ pay.node }}">{{ pay.machine }}</a>{% else %}{{ pay.node[:8] }}{% endif %}</td><td class="num">{{ pay.rounds }}</td><td class="num">{{ pay.amount|num }}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
+{% endif %}
+<h2 id="trainers">Trainers</h2>
+{% if pending %}
+<p class="muted">{{ pending|length }} machine{{ 's' if pending|length != 1 }} waiting for your decision. Approve the ones you trust with your data.</p>
+<table class="requests">
+  <thead><tr><th>machine</th><th>hardware</th><th class="num">TFLOPS</th><th>reputation</th><th>asked</th><th>decision</th></tr></thead>
+  <tbody>
+  {% for e, mm in pending %}
+    <tr>
+      <td><span class="name">{{ mm.name }}</span><br><span class="muted small">{{ mm.user.email if mm.user else '' }} · {{ m.status(mm.status) }}</span></td>
+      <td class="small">{{ describe_hardware(mm.hardware) }}</td>
+      <td class="num">{{ mm.hardware.tflops if mm.hardware and mm.hardware.tflops else '–' }}</td>
+      <td class="small">honesty {{ '%.2f'|format(mm.honesty) }} · {{ mm.rounds_served }} rounds · {{ mm.samples_verified|num }} samples verified</td>
+      <td class="small">{{ e.requested_at|ago }} ago{% if e.source == 'auto' %}<br><span class="muted">asked by the scheduler</span>{% endif %}</td>
+      <td>
+        <form method="post" action="/jobs/{{ job.id }}/enrolments/{{ mm.node_id }}/approve" class="inline-form decide"><input type="text" name="note" placeholder="note for the owner of the machine" aria-label="note" maxlength="500"><button type="submit">Approve</button></form>
+        <form method="post" action="/jobs/{{ job.id }}/enrolments/{{ mm.node_id }}/reject" class="inline-form"><input type="hidden" name="note" value=""><button type="submit" class="secondary">Reject</button></form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% elif spec.enrolment.approval == 'owner' and job.status == 'running' %}
+<p class="empty">No machine is waiting for approval. {% if spec.enrolment.mode == 'join' %}Trainers find this job under Open jobs and ask to join; each request appears here and in your mail.{% else %}The scheduler asks you the first time a fitting machine is idle; the request appears here and in your mail.{% endif %}</p>
+{% endif %}
+{% set decided = enrolments|rejectattr('0.status', 'equalto', 'pending')|list %}
+{% if decided %}
+<table>
+  <thead><tr><th>machine</th><th>standing</th><th>hardware</th><th>reputation</th><th>since</th><th></th></tr></thead>
+  <tbody>
+  {% for e, mm in decided %}
+    <tr><td>{% if show_names %}<a href="/machine/{{ mm.node_id }}">{{ mm.name }}</a>{% else %}{{ mm.name }}{% endif %}</td><td><span class="chip chip-{{ e.status }}"><span class="dot"></span>{{ e.status }}</span>{% if e.note %} <span class="muted small">{{ e.note }}</span>{% endif %}</td><td class="small">{{ describe_hardware(mm.hardware) }}</td><td class="small">honesty {{ '%.2f'|format(mm.honesty) }} · {{ mm.rounds_served }} rounds</td><td class="small">{{ (e.decided_at or e.requested_at)|ago }} ago</td>
+      <td>{% if e.status == 'approved' and job.status == 'running' %}<form method="post" action="/jobs/{{ job.id }}/enrolments/{{ mm.node_id }}/reject" class="inline-form"><input type="hidden" name="note" value="removed by the owner"><button type="submit" class="secondary small-btn">Remove</button></form>{% elif e.status == 'rejected' and job.status == 'running' %}<form method="post" action="/jobs/{{ job.id }}/enrolments/{{ mm.node_id }}/approve" class="inline-form"><input type="hidden" name="note" value=""><button type="submit" class="secondary small-btn">Approve after all</button></form>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
 <h2>Rounds</h2>
 {% if rounds %}
 <table>
   <thead><tr><th class="num">round</th><th>status</th><th class="num">trainers</th><th class="num">eval loss</th><th class="num">eval acc</th><th class="num">mean train loss</th><th class="num">bytes in</th><th>closed</th><th>weights</th></tr></thead>
   <tbody>
   {% for r in rounds|reverse %}
-    <tr><td class="num">{{ r.index }}</td><td>{{ r.status }}</td><td class="num">{{ r.accepted }}</td><td class="num">{{ r.eval_loss|f3 }}</td><td class="num">{{ r.eval_acc|pct }}</td><td class="num">{{ r.mean_loss_end|f3 }}</td><td class="num">{{ r.bytes_in|bytes }}</td><td>{% if r.closed_at %}{{ r.closed_at|ago }} ago{% else %}deadline in {{ r.deadline_at|ago }}{% endif %}</td><td>{% if r.index in after %}<a class="linkbtn" href="/jobs/{{ job.id }}/download?blob={{ after[r.index] }}">download</a>{% endif %}</td></tr>
+    <tr><td class="num">{{ r.index }}</td><td>{{ r.status }}</td><td class="num">{{ r.accepted }}</td><td class="num">{{ r.eval_loss|f3 }}</td><td class="num">{{ r.eval_acc|pct }}</td><td class="num">{{ r.mean_loss_end|f3 }}</td><td class="num">{{ r.bytes_in|bytes }}</td><td>{% if r.closed_at %}{{ r.closed_at|ago }} ago{% else %}deadline in {{ r.deadline_at|ago }}{% endif %}</td><td>{% if r.index in after and can_download %}<a class="linkbtn" href="/jobs/{{ job.id }}/download?blob={{ after[r.index] }}">download</a>{% elif r.index in after %}<span class="muted small">at the end</span>{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>
@@ -23,11 +70,19 @@
 <h2>Trainers per round</h2>
 {% if updates %}
 <table>
-  <thead><tr><th class="num">round</th><th>machine</th><th class="num">shard</th><th>status</th><th class="num">samples</th><th class="num">loss start</th><th class="num">loss end</th><th class="num">gain own</th><th class="num">gain other</th><th class="num">score</th><th class="num">bytes</th></tr></thead>
+  <thead><tr><th class="num">round</th><th>machine</th><th class="num">shard</th><th>status</th><th class="num">samples</th><th class="num">loss start</th><th class="num">loss end</th><th class="num">gain own</th><th class="num">gain other</th><th class="num">score</th><th class="num">bytes</th>{% if job.funding %}<th class="num">on hold</th>{% endif %}</tr></thead>
   <tbody>
   {% for u in updates %}
-    <tr><td class="num">{{ u.round_index }}</td><td>{% if show_names %}<a href="/machine/{{ u.machine.node_id }}">{{ u.machine.name }}</a>{% else %}{{ u.machine.node_id[:8] }}{% endif %}</td><td class="num">{{ u.shard_index }}</td><td>{{ u.status }}{% if u.reject_reason %} <span class="muted small">{{ u.reject_reason }}</span>{% endif %}</td><td class="num">{{ u.samples|num }}</td><td class="num">{{ u.loss_start|f3 }}</td><td class="num">{{ u.loss_end|f3 }}</td><td class="num">{{ u.gain_assigned|f3 }}</td><td class="num">{{ u.gain_random|f3 }}</td><td class="num">{{ u.score|f3 }}</td><td class="num">{{ u.frame_bytes|bytes }}</td></tr>
+    <tr><td class="num">{{ u.round_index }}</td><td>{% if show_names %}<a href="/machine/{{ u.machine.node_id }}">{{ u.machine.name }}</a>{% else %}{{ u.machine.node_id[:8] }}{% endif %}</td><td class="num">{{ u.shard_index }}</td><td>{{ u.status }}{% if u.reject_reason %} <span class="muted small">{{ u.reject_reason }}</span>{% endif %}</td><td class="num">{{ u.samples|num }}</td><td class="num">{{ u.loss_start|f3 }}</td><td class="num">{{ u.loss_end|f3 }}</td><td class="num">{{ u.gain_assigned|f3 }}</td><td class="num">{{ u.gain_random|f3 }}</td><td class="num">{{ u.score|f3 }}</td><td class="num">{{ u.frame_bytes|bytes }}</td>{% if job.funding %}<td class="num">{{ u.credits|num if u.status == 'accepted' else '' }}</td>{% endif %}</tr>
   {% endfor %}
   </tbody>
 </table>
 {% else %}<p class="empty">No trainer has taken a round yet. Machines join at the next heartbeat.</p>{% endif %}
+{% if exposure %}
+<h2>Data exposure</h2>
+<p class="muted">Which machines received which shards. A machine that trains a shard sees it in clear; {% if spec.privacy.sticky_shards %}this job keeps each machine on the shards it already saw{% else %}this job hands out a different shard each round{% endif %}{% if spec.privacy.max_shards_per_machine %}, and never more than {{ spec.privacy.max_shards_per_machine }} per machine{% endif %}.</p>
+<table>
+  <thead><tr><th>machine</th><th class="num">shards seen</th><th class="num">share of the dataset</th><th>which</th></tr></thead>
+  <tbody>{% for x in exposure %}<tr><td>{% if show_names %}<a href="/machine/{{ x.node }}">{{ x.machine }}</a>{% else %}{{ x.node[:8] }}{% endif %}</td><td class="num">{{ x.count }} / {{ job.shards|length }}</td><td class="num">{{ x.fraction|pct }}</td><td class="small mono">{{ x.shards[:12]|join(', ') }}{% if x.count > 12 %}, …{% endif %}</td></tr>{% endfor %}</tbody>
+</table>
+{% endif %}

@@ -48,6 +48,11 @@ index = u64_le(blake3(job_seed || u64_le(round) || node_id)[0:8]) mod num_shards
   for the smallest `k`. Two trainers in one round therefore train different shards; the
   round's ledger entry records which shard each update used. Only when a round has more
   trainers than the job has shards does a shard repeat.
+- A job with `privacy.sticky_shards` prefers, for each trainer, the lowest-numbered shard
+  that trainer already trained in an earlier round and that is free in this round; the
+  hashed start applies only when none is free. A job with `privacy.max_shards_per_machine`
+  gives a trainer no new shard once it has seen that many; the trainer sits the round out
+  when all of its shards are taken.
 
 ## 5. Δ frame
 
@@ -135,3 +140,34 @@ with their reasons.
 Known limits: one bad update can enter the aggregate before its machine's honesty falls
 below the floor. A trainer that trains honestly on wrong data is indistinguishable from a
 weak trainer. These limits are the same in every live network today.
+
+## 8. Sealed shards
+
+A job with `privacy.encrypt_shards` uploads every data shard and the eval shard sealed:
+
+| Field | Size | Value |
+|---|---|---|
+| magic | 4 bytes | `PLSE` |
+| version | 1 byte | `1` |
+| nonce | 12 bytes | random per blob |
+| body | rest | AES-256-GCM ciphertext and tag of the shard bytes |
+
+- The key is 32 random bytes chosen by the submitter, one per job, sent to the
+  coordinator in the job creation request as 64 hex characters.
+- The associated data is the UTF-8 string `plasmon shard v1`.
+- The blob id is the BLAKE3 digest of the sealed bytes. Two seals of the same shard have
+  different nonces and therefore different blob ids.
+- The coordinator stores the key wrapped (AES-GCM under a key derived from its own
+  Ed25519 seed with HKDF-SHA256, info `plasmon shard key wrapping`) and sends it to a
+  trainer only inside an assignment, as `data_key`.
+- A trainer caches the sealed bytes and unseals them in memory. The initial weights and the
+  Δ frames are not sealed: every trainer needs the weights, and frames are the trainer's own.
+
+## 9. Ledger entries
+
+The ledger holds one signed entry per event. Kinds: `job_created` (with `funding`, the
+enrolment mode and whether the shards are sealed), `round` (accepted updates with their
+shard, samples, score and credits held, rejected updates with reasons, credits spent and
+held), `job_finished` (status, rounds, the final weights blob, a reason when it did not
+complete) and `job_settled` (funding, paid, fee, refund, and one payout per node). A funded
+job writes `job_finished` and `job_settled` together.

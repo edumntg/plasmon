@@ -23,8 +23,39 @@ def _gpu() -> dict[str, Any]:
     return {"kind": "none"}
 
 
+def benchmark_tflops(seconds: float = 0.3) -> float | None:
+    """Matmul throughput of the device the trainer would use, in TFLOPS. A fixed time budget
+    keeps it short on a CPU; fp16 on CUDA, where tensor cores do the training work."""
+    try:
+        import time
+
+        import torch
+
+        if torch.cuda.is_available():
+            device, dtype, n = torch.device("cuda"), torch.float16, 4096
+        else:
+            device, dtype, n = torch.device("cpu"), torch.float32, 1024
+        a = torch.randn(n, n, device=device, dtype=dtype)
+        b = torch.randn(n, n, device=device, dtype=dtype)
+        a @ b  # warm up kernels and allocator
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        flops_per_matmul = 2.0 * n * n * n
+        count = 0
+        start = time.perf_counter()
+        while time.perf_counter() - start < seconds:
+            a @ b
+            count += 1
+        if device.type == "cuda":
+            torch.cuda.synchronize()
+        elapsed = time.perf_counter() - start
+        return round(count * flops_per_matmul / elapsed / 1e12, 3)
+    except Exception:
+        return None
+
+
 def hardware() -> dict[str, Any]:
-    return {
+    out = {
         "hostname": platform.node(),
         "os": f"{platform.system()} {platform.release()}",
         "arch": platform.machine(),
@@ -32,6 +63,10 @@ def hardware() -> dict[str, Any]:
         "ram_gb": round(psutil.virtual_memory().total / 2**30, 1),
         "gpu": _gpu(),
     }
+    tflops = benchmark_tflops()
+    if tflops is not None:
+        out["tflops"] = tflops
+    return out
 
 
 def versions() -> dict[str, str]:

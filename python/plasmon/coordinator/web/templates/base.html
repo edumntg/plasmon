@@ -34,6 +34,7 @@
     {% if user %}
     <a href="/" {% if active == 'overview' %}aria-current="page"{% endif %}>Overview</a>
     <a href="/jobs" {% if active == 'jobs' %}aria-current="page"{% endif %}>Jobs</a>
+    <a href="/jobs/open" {% if active == 'open' %}aria-current="page"{% endif %}>Open jobs</a>
     <a href="/machine" {% if active == 'machine' %}aria-current="page"{% endif %}>My machine</a>
     {% if role_at_least(user.role, 'operator') %}
     <a href="/fleet" {% if active == 'fleet' %}aria-current="page"{% endif %}>Fleet</a>

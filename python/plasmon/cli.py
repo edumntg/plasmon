@@ -304,6 +304,88 @@ def cmd_job_cancel(args: argparse.Namespace) -> int:
     return 0
 
 
+def _pays(j: dict) -> str:
+    if j.get("funding"):
+        return f"{j['per_round']}/round of {j['funding']}"
+    if j.get("credits_per_1k_samples"):
+        return f"{j['credits_per_1k_samples']:g}/1k samples"
+    return "reputation"
+
+
+def _needs(req: dict) -> str:
+    parts = []
+    if req.get("device", "any") != "any":
+        parts.append(req["device"])
+    if req.get("min_vram_gb"):
+        parts.append(f"{req['min_vram_gb']:g} GB VRAM")
+    if req.get("min_tflops"):
+        parts.append(f"{req['min_tflops']:g} TFLOPS")
+    if req.get("min_honesty"):
+        parts.append(f"honesty {req['min_honesty']:g}")
+    return ", ".join(parts) or "any machine"
+
+
+def cmd_job_open(args: argparse.Namespace) -> int:
+    jobs = _client(args).open_jobs()
+    rows = []
+    for j in jobs:
+        enrol = j["enrolment"]["mode"] + (" + approval" if j["enrolment"]["approval"] == "owner" else "")
+        mine = ", ".join(f"{m['name']}: {m['standing']}" for m in j["mine"]) or "-"
+        rows.append([j["id"], j["name"], j["owner"], _pays(j), _needs(j["requirements"]), enrol, f"{j['round']}/{j['total_rounds']}", j["trainers_now"], mine])
+    text = _fmt_table(rows, ["id", "name", "owner", "pays", "needs", "enrolment", "round", "trainers", "your machines"]) if rows else "no job is running"
+    if rows:
+        text += "\n\njoin one with: plasmon trainer join <id>"
+    _print(args, jobs, text)
+    return 0
+
+
+def _this_machine() -> str | None:
+    from .core.identity import Identity
+
+    key = machine_key_path()
+    return Identity.load(key).node_id if key.exists() else None
+
+
+def cmd_trainer_enrol(args: argparse.Namespace) -> int:
+    client = _client(args)
+    node = args.machine or _this_machine()
+    joining = args.trainer_command == "join"
+    out = client.join_job(args.job, node) if joining else client.leave_job(args.job, node)
+    status = out["status"]
+    if status == "approved":
+        text = f"{out['machine']} joined job {args.job}; it takes a round at its next heartbeat"
+    elif status == "pending":
+        text = f"{out['machine']} asked to join job {args.job}; the owner decides and you get a mail either way"
+    elif status == "left":
+        text = f"{out['machine']} left job {args.job}; it finishes its current round and takes no more"
+    else:
+        text = f"{out['machine']}: {status}"
+    _print(args, out, text)
+    return 0
+
+
+def _enrolment_rows(rows: list[dict]) -> list[list[str]]:
+    return [[e["machine"], e["status"], e.get("owner") or "", e["hardware_text"], f"{e['tflops']:g}" if e.get("tflops") else "-", f"{e['honesty']:.2f}", e["rounds_served"], _ago(e.get("requested_at")), e.get("note") or ""] for e in rows]
+
+
+def cmd_job_approvals(args: argparse.Namespace) -> int:
+    rows = _client(args).job_enrolments(args.id)
+    text = _fmt_table(_enrolment_rows(rows), ["machine", "status", "owner", "hardware", "tflops", "honesty", "rounds", "asked", "note"]) if rows else "no machine has asked to join this job"
+    pending = [e for e in rows if e["status"] == "pending"]
+    if pending:
+        text += f"\n\n{len(pending)} waiting: plasmon job approve {args.id} <machine>   or   plasmon job reject {args.id} <machine>"
+    _print(args, rows, text)
+    return 0
+
+
+def cmd_job_decide(args: argparse.Namespace) -> int:
+    client = _client(args)
+    approving = args.job_command == "approve"
+    out = client.approve(args.id, args.machine, args.note or "") if approving else client.reject(args.id, args.machine, args.note or "")
+    _print(args, out, f"{out['machine']} {out['status']} for job {args.id}" + ("; it takes a round at its next heartbeat" if approving else ""))
+    return 0
+
+
 # ----- trainer ---------------------------------------------------------------------------
 
 def cmd_trainer_start(args: argparse.Namespace) -> int:
@@ -585,6 +667,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = job.add_parser("cancel", parents=[common])
     p.add_argument("id")
     p.set_defaults(handler=cmd_job_cancel)
+    job.add_parser("open", help="running jobs a trainer can join, with pay and requirements", parents=[common]).set_defaults(handler=cmd_job_open)
+    p = job.add_parser("approvals", help="machines that asked to train a job of yours", parents=[common])
+    p.add_argument("id")
+    p.set_defaults(handler=cmd_job_approvals)
+    for name, help_ in (("approve", "let a machine train your job"), ("reject", "keep a machine off your job")):
+        p = job.add_parser(name, help=help_, parents=[common])
+        p.add_argument("id")
+        p.add_argument("machine", help="machine name, node id or its prefix")
+        p.add_argument("--note", default="", help="a sentence the machine's owner receives")
+        p.set_defaults(handler=cmd_job_decide)
 
     trainer = sub.add_parser("trainer", help="offer this machine").add_subparsers(dest="trainer_command")
     p = trainer.add_parser("start", parents=[common])
@@ -594,6 +686,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--hours", action="append", help="only train inside this window, e.g. 'weekdays 19:00-08:00' (repeatable)")
     p.add_argument("--never-on-battery", action="store_true")
     p.set_defaults(handler=cmd_trainer_start)
+    for name, help_ in (("join", "offer this machine to one open job"), ("leave", "take this machine off a job")):
+        p = trainer.add_parser(name, help=help_, parents=[common])
+        p.add_argument("job", help="job id, see `plasmon job open`")
+        p.add_argument("--machine", help="another machine of yours: name, node id or its prefix (default: this machine)")
+        p.set_defaults(handler=cmd_trainer_enrol)
     for name, help_ in (("enable", "run the trainer at login as a user service"), ("disable", "remove the user service")):
         p = trainer.add_parser(name, help=help_, parents=[common])
         p.add_argument("--name")

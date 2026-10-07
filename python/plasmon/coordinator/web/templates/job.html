@@ -3,13 +3,17 @@
 <div class="titlerow">
   <h1>{{ job.name }} <span class="muted small">{{ job.id }}</span></h1>
   <div class="toolbar">
-    <a class="button" href="/jobs/{{ job.id }}/download">Download latest weights</a>
+    {% if can_download %}<a class="button" href="/jobs/{{ job.id }}/download">Download latest weights</a>
+    {% else %}<span class="muted small locked-note">Weights unlock when the job ends and the trainers are paid.</span>{% endif %}
     {% if job.status == 'running' %}
-    <form method="post" action="/jobs/{{ job.id }}/cancel" onsubmit="return confirm('Cancel this job? Trainers stop at the end of the current round.')"><button type="submit" class="danger">Cancel job</button></form>
+    <form method="post" action="/jobs/{{ job.id }}/cancel" onsubmit="return confirm('Cancel this job? Trainers stop at the end of the current round{% if job.funding %}; the rounds that closed are paid and the rest of the funding comes back{% endif %}.')"><button type="submit" class="danger">Cancel job</button></form>
     {% endif %}
   </div>
 </div>
-<p class="muted">Submitted by {{ job.owner.email if job.owner else job.owner_id }} {{ job.created_at|ago }} ago · {{ job.spec.model.arch }} · {{ job.spec.dataset.source }}</p>
+<p class="muted">Submitted by {{ job.owner.email if job.owner else job.owner_id }} {{ job.created_at|ago }} ago · {{ job.spec.model.arch }} · {{ job.spec.dataset.source }}{% if job.data_key %} · shards sealed{% endif %} · enrolment {{ spec.enrolment.mode }}{% if spec.enrolment.approval == 'owner' %}, owner approves{% endif %}</p>
+{% if result.startswith('approve:') %}<p class="ok" role="status">{{ result[8:] }} approved. It takes a round at its next heartbeat.</p>
+{% elif result.startswith('reject:') %}<p class="ok" role="status">{{ result[7:] }} will not train this job.</p>
+{% elif result.startswith('error:') %}<p class="error" role="alert">{{ result[6:] }}</p>{% endif %}
 <div class="legend" aria-hidden="true"><span class="l-training"><i></i>update in flight</span><span class="l-paused dashed"><i></i>committed, upload pending</span><span class="dashed"><i></i>assigned</span><span class="l-offline dashed"><i></i>rejected or expired</span></div>
 <div class="diagram is-loading" data-diagram="job" data-job="{{ job.id }}" aria-busy="true">
   <div class="skeleton" style="left: 16px; top: 44px; width: 120px; height: 62px;"></div>
@@ -21,5 +25,5 @@
 <div id="job" hx-get="/partials/jobs/{{ job.id }}" hx-trigger="{% if job.status == 'running' %}every 4s{% else %}none{% endif %}" hx-swap="innerHTML">
   {% include "partials/job_live.html" %}
 </div>
-<p class="muted small">From a terminal: <code>plasmon job download {{ job.id }}</code> · <code>plasmon job watch {{ job.id }}</code></p>
+<p class="muted small">From a terminal: <code>plasmon job download {{ job.id }}</code> · <code>plasmon job watch {{ job.id }}</code>{% if spec.enrolment.approval == 'owner' %} · <code>plasmon job approvals {{ job.id }}</code>{% endif %}</p>
 {% endblock %}

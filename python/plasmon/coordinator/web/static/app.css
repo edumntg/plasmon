@@ -257,3 +257,21 @@ body.is-loaded .rise { animation: rise 320ms ease-out both; animation-delay: cal
   .ps-ants, .ps-node.status-training .ps-port::after, body.is-loaded .rise, .diagram .skeleton, .flash { animation: none !important; }
 }
 @media (max-width: 720px) { .split { grid-template-columns: 1fr; } .cards { grid-template-columns: repeat(2, 1fr); } }
+
+/* Marketplace: enrolment and hold standings reuse the status scale, each colour paired with its word. */
+.chip-approved, .chip-released { color: var(--st-training); }
+.chip-pending, .chip-held { color: var(--st-paused); }
+.chip-rejected, .chip-voided { color: var(--st-offline); }
+.chip-left { color: var(--st-unavailable); }
+.standing { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 3px 0; }
+.standing + .standing { border-top: 1px dashed var(--line); }
+button.small-btn { padding: 4px 10px; font-size: 0.85rem; }
+.inline-form.decide input[type="text"] { width: 220px; padding: 5px 8px; font-size: 0.85rem; }
+table.requests td, table.open-jobs td { vertical-align: top; }
+td .name, span.name { font-weight: 600; }
+.locked-note { align-self: center; max-width: 260px; }
+details.hint { margin: 6px 0 14px; max-width: 640px; }
+details.hint summary { cursor: pointer; color: var(--ink-2); }
+details.hint pre { background: var(--paper-2); border-radius: var(--radius-panel); padding: 10px 12px; font-size: 0.82rem; overflow: auto; margin: 8px 0 0; }
+.offline-note { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); background: var(--paper); color: var(--st-offline); border: 1px solid var(--st-offline); border-radius: var(--radius); padding: 6px 12px; font-size: 0.85rem; box-shadow: var(--shadow); z-index: 20; }
+@media (max-width: 720px) { .inline-form.decide input[type="text"] { width: 100%; } .inline-form.decide { flex-wrap: wrap; } }

@@ -25,6 +25,7 @@ from ..client import ApiError, Client
 from ..coordinator.config import OrgPolicy, Window
 from ..coordinator.policy import available as policy_available
 from ..core import frame as fr
+from ..core import sealed
 from ..core.identity import Identity
 from ..core.jobspec import JobSpec
 from ..credentials import MachineCredentials, load_machine, machine_path, save_machine
@@ -100,6 +101,7 @@ class Agent:
         self.idle_interval = 3
         self.session_rounds = 0
         self.session_samples = 0
+        self.standing: dict[str, tuple[str, str]] = {}  # job id -> (pending|rejected, job name), as the last heartbeat reported it
         self.machine_creds_path: Path = machine_path()
         self._lock = threading.Lock()
         self._hb_lock = threading.Lock()  # one heartbeat on the wire at a time
@@ -162,6 +164,7 @@ class Agent:
                 self.policy = OrgPolicy.model_validate(reply["policy"])
             except ValueError:
                 pass
+        self._log_standing(reply.get("enrolments") or [])
         for cmd in reply.get("commands", []):
             if cmd["type"] == "pause" and not self.paused:
                 log.info("paused: %s", cmd.get("reason", ""))
@@ -172,6 +175,21 @@ class Agent:
             log.info("resumed")
             self.paused = False
         return reply
+
+    def _log_standing(self, rows: list[dict[str, Any]]) -> None:
+        """One line when a job starts or stops waiting on the owner's decision about this machine."""
+        current = {r["job"]: (r["status"], r.get("name") or r["job"]) for r in rows}
+        for job_id, (status, name) in current.items():
+            if self.standing.get(job_id, ("", ""))[0] == status:
+                continue
+            if status == "pending":
+                log.info("job %s: waiting for the owner to approve this machine", name)
+            elif status == "rejected":
+                log.info("job %s: the owner did not accept this machine; it takes no rounds of this job", name)
+        for job_id in set(self.standing) - set(current):
+            if self.standing[job_id][0] == "pending":
+                log.info("job %s: approved; this machine may take its rounds now", self.standing[job_id][1])
+        self.standing = current
 
     def _heartbeat_thread(self) -> None:
         while not self.stop_event.is_set():
@@ -216,7 +234,10 @@ class Agent:
             log.debug("heartbeat at round start failed: %s", e)
         t0 = time.perf_counter()
         theta = weights.from_bytes(self.fetch_blob(a["theta"]))
-        shard = data.Shard.from_bytes(self.fetch_blob(a["shard"]["blob"]))
+        shard_bytes = self.fetch_blob(a["shard"]["blob"])
+        if a.get("data_key"):  # the cache keeps the sealed bytes; the clear shard lives in memory only
+            shard_bytes = sealed.unseal(bytes.fromhex(a["data_key"]), shard_bytes)
+        shard = data.Shard.from_bytes(shard_bytes)
         x, y = data.to_tensors(shard)
         t_fetch = time.perf_counter()
 

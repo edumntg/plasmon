@@ -1,0 +1,31 @@
+# A job for a server other people use: funded, joined by trainers you approve, with
+# sealed shards. MNIST stands in for a private dataset; use a path to your own .npz or .csv.
+name: mnist-funded
+model:
+  arch: mnist_cnn
+dataset:
+  source: builtin://mnist
+  shard_size: 1000
+  eval_fraction: 0.1
+recipe:
+  inner_steps: 50
+  batch_size: 64
+  inner_optimizer: {name: adamw, lr: 2.0e-3}
+  compression: {name: topk, topk: 0.1, error_feedback: true}
+requirements:
+  device: any
+  min_tflops: 0.05          # a laptop CPU measures around 0.1; an RTX 4090 around 80
+  min_honesty: 0.5
+  min_trainers: 1
+  max_trainers: 8
+  round_timeout_s: 300
+enrolment:
+  mode: join                # trainers take it from Open jobs or `plasmon job open`
+  approval: owner           # you approve each machine; the request arrives by mail
+privacy:
+  encrypt_shards: true      # sealed on your machine; the blob store never holds samples in clear
+  sticky_shards: true       # each machine keeps the shards it already saw
+  max_shards_per_machine: 3
+budget:
+  rounds: 20
+  funding: 2000             # 100 credits per round on hold for the trainers, released when the job ends

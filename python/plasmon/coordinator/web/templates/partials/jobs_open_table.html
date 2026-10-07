@@ -1,0 +1,36 @@
+{% if not machines %}
+<p class="empty">No machine is linked to your account yet, so there is nothing to join with. On the PC you want to lend, run <code>plasmon login</code> and <code>plasmon trainer start</code>; it appears here within one heartbeat.</p>
+{% endif %}
+{% if jobs %}
+<table class="open-jobs">
+  <thead><tr><th>job</th><th>pays</th><th>needs</th><th>enrolment</th><th class="num">round</th><th class="num">trainers now</th><th>your machines</th></tr></thead>
+  <tbody>
+  {% for j in jobs %}
+    <tr>
+      <td><span class="name">{{ j.name }}</span><br><span class="muted small">{{ j.owner }} · {{ j.arch }} · {{ j.param_count|num }} params{% if j.sealed %} · sealed data{% endif %}</span></td>
+      <td>{% if j.funding %}<span class="name">{{ j.per_round|num }}</span> <span class="muted small">{{ unit }}s per round, from {{ j.funding|num }} locked</span><br><span class="muted small">released when the job ends</span>{% elif j.credits_per_1k_samples %}{{ j.credits_per_1k_samples }} <span class="muted small">{{ unit }}s per 1,000 samples, paid each round</span>{% else %}<span class="muted">reputation only</span>{% endif %}</td>
+      <td class="small">{% set r = j.requirements %}{{ 'any device' if r.device == 'any' else r.device }}{% if r.min_vram_gb %} · {{ r.min_vram_gb }} GB VRAM{% endif %}{% if r.min_tflops %} · {{ r.min_tflops }} TFLOPS{% endif %}{% if r.min_honesty %} · honesty {{ r.min_honesty }}{% endif %}<br><span class="muted">{{ j.inner_steps }} steps × {{ j.batch_size }} per round · {{ j.shards }} shards of {{ j.shard_size|num }}</span></td>
+      <td class="small">{{ j.enrolment.mode }}{% if j.enrolment.approval == 'owner' %} · owner approves{% endif %}{% if j.privacy.max_shards_per_machine %}<br><span class="muted">at most {{ j.privacy.max_shards_per_machine }} shards per machine</span>{% endif %}{% if j.pending %}<br><span class="muted">{{ j.pending }} waiting for approval</span>{% endif %}</td>
+      <td class="num">{{ j.round }} / {{ j.total_rounds }}</td>
+      <td class="num">{{ j.trainers_now }}</td>
+      <td>
+        {% for m in j.mine %}
+        <div class="standing">
+          <span class="small">{{ m.name }}</span>
+          {% if m.standing == 'approved' %}<span class="chip chip-approved"><span class="dot"></span>joined</span>
+            <form method="post" action="/jobs/{{ j.id }}/leave" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node }}"><input type="hidden" name="next" value="/jobs/open"><button type="submit" class="secondary small-btn">Leave</button></form>
+          {% elif m.standing == 'pending' %}<span class="chip chip-pending"><span class="dot"></span>waiting for approval</span>
+            <form method="post" action="/jobs/{{ j.id }}/leave" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node }}"><input type="hidden" name="next" value="/jobs/open"><button type="submit" class="secondary small-btn">Withdraw</button></form>
+          {% elif m.standing == 'rejected' %}<span class="chip chip-rejected"><span class="dot"></span>not accepted</span>
+          {% elif m.standing == 'automatic' %}<span class="chip chip-approved"><span class="dot"></span>assigned automatically</span>
+            <form method="post" action="/jobs/{{ j.id }}/leave" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node }}"><input type="hidden" name="next" value="/jobs/open"><button type="submit" class="secondary small-btn">Opt out</button></form>
+          {% elif m.standing == 'unfit' %}<span class="chip chip-left"><span class="dot"></span>does not fit</span> <span class="muted small">{{ m.reason }}</span>
+          {% else %}<form method="post" action="/jobs/{{ j.id }}/join" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node }}"><input type="hidden" name="next" value="/jobs/open"><button type="submit" class="small-btn">{{ 'Ask to join' if j.enrolment.approval == 'owner' else 'Join' }}</button></form>{% endif %}
+        </div>
+        {% endfor %}
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">No job is running right now. When someone submits one, it appears here, and a job in automatic mode reaches your machines without any step on your side.</p>{% endif %}

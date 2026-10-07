@@ -113,6 +113,13 @@ def heartbeat(body: HeartbeatIn, machine: db.Machine = Depends(current_machine),
     if body.job_id:
         j = session.get(db.Job, body.job_id)
         job_info = {"status": j.status, "round": j.round_index} if j is not None else {"status": "unknown", "round": None}
+    # jobs where this machine is not (yet) allowed to train, so the trainer log can say why it waits
+    standing = [
+        {"job": e.job_id, "name": j.name, "status": e.status}
+        for e, j in session.execute(
+            select(db.Enrolment, db.Job).join(db.Job, db.Job.id == db.Enrolment.job_id).where(db.Enrolment.machine_id == machine.id, db.Job.status == "running", db.Enrolment.status.in_(("pending", "rejected")))
+        ).all()
+    ]
     session.commit()
     state.bus.publish("fleet", {"event": "heartbeat", "node": machine.node_id, "status": body.status, "job": body.job_id, "round": body.round})
     if body.status == "error" and was != "error":
@@ -125,6 +132,7 @@ def heartbeat(body: HeartbeatIn, machine: db.Machine = Depends(current_machine),
         "commands": commands,
         "assignment": assignment,
         "job": job_info,
+        "enrolments": standing,
         "policy": policy.load(session, state.cfg.policy.defaults).model_dump(mode="json"),
     }
 

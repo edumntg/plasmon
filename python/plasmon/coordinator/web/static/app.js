@@ -75,3 +75,20 @@
     });
   });
 })();
+
+// A live table that stopped refreshing looks current. Say so when the server does not answer.
+(function () {
+  var note = null;
+  function show() {
+    if (note) return;
+    note = document.createElement("div");
+    note.className = "offline-note";
+    note.setAttribute("role", "status");
+    note.textContent = "Lost the connection to the server. Retrying every few seconds.";
+    document.body.appendChild(note);
+  }
+  function hide() { if (note) { note.remove(); note = null; } }
+  document.addEventListener("htmx:sendError", show);
+  document.addEventListener("htmx:responseError", function (e) { if (e.detail.xhr && e.detail.xhr.status >= 500) show(); });
+  document.addEventListener("htmx:afterOnLoad", function (e) { if (e.detail.xhr && e.detail.xhr.status < 500) hide(); });
+})();

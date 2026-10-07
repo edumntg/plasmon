@@ -12,5 +12,37 @@
   {% endif %}
 </div>
 {% endif %}
+{% if result.startswith('approved:') %}<p class="ok" role="status">Joined {{ result[9:] }}. The machine takes a round at its next heartbeat.</p>
+{% elif result.startswith('pending:') %}<p class="ok" role="status">Asked to join {{ result[8:] }}. The owner decides; you get a mail either way.</p>
+{% elif result.startswith('left:') %}<p class="ok" role="status">Left {{ result[5:] }}.</p>
+{% elif result.startswith('error:') %}<p class="error" role="alert">{{ result[6:] }}</p>{% endif %}
 <div id="machine" hx-get="/partials/machine/{{ m.node_id }}" hx-trigger="every 4s" hx-swap="innerHTML">{% include "partials/machine_live.html" %}</div>
+<h2>Jobs for this machine</h2>
+{% if standing %}
+<table>
+  <thead><tr><th>job</th><th>standing</th><th>since</th><th></th></tr></thead>
+  <tbody>
+  {% for e, j in standing %}
+    <tr><td><a href="/jobs/{{ j.id }}">{{ j.name }}</a> <span class="muted small">round {{ j.round_index }} / {{ j.total_rounds }}</span></td>
+      <td><span class="chip chip-{{ e.status }}"><span class="dot"></span>{{ 'joined' if e.status == 'approved' else ('waiting for approval' if e.status == 'pending' else ('not accepted' if e.status == 'rejected' else 'left')) }}</span>{% if e.note %} <span class="muted small">{{ e.note }}</span>{% endif %}</td>
+      <td class="small">{{ (e.decided_at or e.requested_at)|ago }} ago</td>
+      <td>{% if e.status in ('approved', 'pending') %}<form method="post" action="/jobs/{{ j.id }}/leave" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node_id }}"><input type="hidden" name="next" value="/machine/{{ m.node_id }}"><button type="submit" class="secondary small-btn">{{ 'Leave' if e.status == 'approved' else 'Withdraw' }}</button></form>{% elif e.status == 'left' %}<form method="post" action="/jobs/{{ j.id }}/join" class="inline-form"><input type="hidden" name="node_id" value="{{ m.node_id }}"><input type="hidden" name="next" value="/machine/{{ m.node_id }}"><button type="submit" class="secondary small-btn">Join again</button></form>{% endif %}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}<p class="empty">This machine has not joined, asked for, or left any running job. Jobs in automatic mode reach it without a step on your side.</p>{% endif %}
+{% if joinable %}
+<form method="post" action="" class="row-form" id="join-form">
+  <label>Join an open job
+    <select name="job" aria-label="open job" onchange="this.form.action = '/jobs/' + this.value + '/join'">
+      {% for j in joinable %}<option value="{{ j.id }}" {% if loop.first %}selected{% endif %}>{{ j.name }}{% if j.funding %} · {{ j.per_round|num }} per round{% endif %}{% if j.enrolment.approval == 'owner' %} · owner approves{% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <input type="hidden" name="node_id" value="{{ m.node_id }}">
+  <input type="hidden" name="next" value="/machine/{{ m.node_id }}">
+  <button type="submit">Join with {{ m.name }}</button>
+</form>
+<script>(function(){var f=document.getElementById('join-form');var s=f.querySelector('select');f.action='/jobs/'+s.value+'/join';})();</script>
+<p class="muted small"><a href="/jobs/open">All open jobs</a> with pay, requirements and who approves.</p>
+{% endif %}
 {% endblock %}

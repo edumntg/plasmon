@@ -65,6 +65,25 @@ class WebhookConfig(BaseModel):
     format: Literal["json", "slack"] = "json"
 
 
+class EmailConfig(BaseModel):
+    """Outgoing mail for the owner of a job (a machine asks to join, the job finished) and for
+    the owner of a machine (approved, rejected, paid). `outbox_dir` writes .eml files instead
+    of sending, for development and tests. Without either, no mail is sent."""
+
+    model_config = ConfigDict(extra="forbid")
+    smtp_host: str | None = None
+    smtp_port: int = 587
+    username: str | None = None
+    password: str | None = None
+    from_addr: str = "plasmon@localhost"
+    starttls: bool = True
+    outbox_dir: str | None = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.smtp_host or self.outbox_dir)
+
+
 class CreditsConfig(BaseModel):
     """Internal credits. Off by default; a company turns it on for chargeback, the public
     network for payouts. No payment provider is wired in: admins grant credits."""
@@ -134,6 +153,7 @@ class ServerConfig(BaseModel):
     retention: RetentionConfig = RetentionConfig()
     scoring: ScoringConfig = ScoringConfig()
     webhooks: list[WebhookConfig] = Field(default_factory=list)
+    email: EmailConfig = EmailConfig()
     credits: CreditsConfig = CreditsConfig()
     run_worker: bool = True  # the round scheduler runs inside the API process
     tick_interval_s: float = 1.0
@@ -185,6 +205,8 @@ def load(path: Path | None = None) -> ServerConfig:
         cfg.blobs.access_key, cfg.blobs.secret_key = key, sec
     if secret := os.environ.get("PLASMON_OIDC_CLIENT_SECRET"):
         cfg.oidc.client_secret = secret
+    if secret := os.environ.get("PLASMON_SMTP_PASSWORD"):
+        cfg.email.password = secret
     return cfg
 
 

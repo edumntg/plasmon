@@ -6,7 +6,16 @@
 {% else %}
 {% if result == 'granted' %}<p class="ok" role="status">Credits granted.</p>{% elif result.startswith('error:') %}<p class="error" role="alert">{{ result[6:] }}</p>{% endif %}
 <div class="focal"><div class="big">{{ balance|num }}</div><div class="label">{{ unit }}s available</div></div>
-<p class="muted">A job pays its price per 1,000 accepted samples each round. {{ 100 - fee_pct }} % goes to the owners of the machines that trained, weighted by score × samples; {{ fee_pct }} % is the fee.</p>
+<dl class="kv">
+  <div><dt>on hold for your machines</dt><dd>{{ on_hold|num }} <span class="muted small">released when those jobs end</span></dd></div>
+  <div><dt>locked in your running jobs</dt><dd>{{ locked|num }} <span class="muted small">paid out to trainers, the fee, and refunded at the end</span></dd></div>
+</dl>
+<p class="muted">A funded job locks its funding when it is submitted and sets aside one share per round for the machines whose updates were accepted, weighted by score × samples. When the job ends, {{ 100 - fee_pct }} % of what was set aside goes to those machines, {{ fee_pct }} % is the fee, and the rest of the funding returns to the owner. A job priced per 1,000 samples pays each round instead.</p>
+{% if holds %}
+<h2>On hold</h2>
+<table><thead><tr><th>when</th><th>job</th><th class="num">round</th><th class="num">amount</th><th>status</th></tr></thead>
+<tbody>{% for h in holds %}<tr><td>{{ h.created_at|ago }} ago</td><td><a href="/jobs/{{ h.job_id }}">{{ job_names.get(h.job_id, h.job_id) }}</a></td><td class="num">{{ h.round_index }}</td><td class="num">{{ h.amount|num }}</td><td><span class="chip chip-{{ h.status }}"><span class="dot"></span>{{ h.status }}</span>{% if h.released_at %} <span class="muted small">{{ h.released_at|ago }} ago</span>{% endif %}</td></tr>{% endfor %}</tbody></table>
+{% endif %}
 <h2>Your movements</h2>
 {% if entries %}
 <table><thead><tr><th>when</th><th>kind</th><th class="num">amount</th><th>job</th><th>memo</th></tr></thead>

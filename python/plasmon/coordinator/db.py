@@ -141,6 +141,10 @@ class Job(Base):
     last_eval_loss: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_eval_acc: Mapped[float | None] = mapped_column(Float, nullable=True)
     credits_spent: Mapped[int] = mapped_column(Integer, default=0)
+    funding: Mapped[int] = mapped_column(Integer, default=0)  # credits locked at submission
+    held: Mapped[int] = mapped_column(Integer, default=0)  # of the funding, set aside by closed rounds for trainers and the fee
+    settlement: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)  # written once, when the job ends
+    data_key: Mapped[str | None] = mapped_column(Text, nullable=True)  # wrapped shard key, hex; None when the shards are in clear
     owner: Mapped[User] = relationship()
 
 
@@ -193,6 +197,39 @@ class Update(Base):
     reject_reason: Mapped[str] = mapped_column(Text, default="")
     credits: Mapped[int] = mapped_column(Integer, default=0)
     machine: Mapped[Machine] = relationship()
+
+
+class Enrolment(Base):
+    """One machine's standing on one job: asked to join, approved, rejected, or left."""
+
+    __tablename__ = "enrolments"
+    __table_args__ = (UniqueConstraint("job_id", "machine_id", name="uq_enrolment"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id"), index=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending|approved|rejected|left
+    source: Mapped[str] = mapped_column(String(8), default="join")  # join: the machine asked; auto: the scheduler asked for it
+    requested_at: Mapped[dt.datetime] = mapped_column(DateTime, default=now)
+    decided_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
+    decided_by: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    machine: Mapped[Machine] = relationship()
+
+
+class Hold(Base):
+    """Credits a closed round set aside from a job's funding. Released when the job ends."""
+
+    __tablename__ = "holds"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), index=True)
+    round_index: Mapped[int] = mapped_column(Integer)
+    update_id: Mapped[int | None] = mapped_column(ForeignKey("updates.id"), nullable=True)
+    machine_id: Mapped[str | None] = mapped_column(ForeignKey("machines.id"), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)  # None: the fee account
+    amount: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="held")  # held|released|voided
+    created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=now)
+    released_at: Mapped[dt.datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class LedgerEntry(Base):
@@ -258,7 +295,7 @@ class CreditEntry(Base):
     job_id: Mapped[str | None] = mapped_column(ForeignKey("jobs.id"), nullable=True, index=True)
     round_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
     amount: Mapped[int] = mapped_column(Integer)
-    kind: Mapped[str] = mapped_column(String(16))  # earn|spend|grant|fee|adjust
+    kind: Mapped[str] = mapped_column(String(16))  # earn|spend|grant|fee|adjust|escrow|refund
     memo: Mapped[str] = mapped_column(Text, default="")
 
 
@@ -289,7 +326,33 @@ def make_engine(url: str):
             cur.close()
 
     Base.metadata.create_all(engine)
+    add_missing_columns(engine)
     return engine
+
+
+def add_missing_columns(engine) -> list[str]:
+    """Columns added to a table after a server was first installed. `create_all` only creates
+    tables, so a release that adds a column would otherwise break an existing database.
+    Returns the columns added, as `table.column`."""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    added = []
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            present = {c["name"] for c in inspector.get_columns(table.name)}
+            for column in table.columns:
+                if column.name in present:
+                    continue
+                ddl = f"ALTER TABLE {table.name} ADD COLUMN {column.name} {column.type.compile(engine.dialect)}"
+                default = column.default.arg if column.default is not None and column.default.is_scalar else None
+                if default is not None:
+                    ddl += f" DEFAULT {default!r}" if isinstance(default, str) else f" DEFAULT {int(default) if isinstance(default, bool) else default}"
+                    if not column.nullable:
+                        ddl += " NOT NULL"
+                conn.execute(text(ddl))
+                added.append(f"{table.name}.{column.name}")
+    return added
 
 
 def make_session_factory(engine) -> sessionmaker[Session]:

@@ -22,7 +22,8 @@ def compose_yaml(domain: str, with_minio: bool, with_postgres: bool, replicas: i
       PLASMON_SESSION_SECRET: "${{PLASMON_SESSION_SECRET}}"
       PLASMON_S3_ACCESS_KEY: "${{S3_ACCESS_KEY}}"
       PLASMON_S3_SECRET_KEY: "${{S3_SECRET_KEY}}"
-      PLASMON_OIDC_CLIENT_SECRET: "${{OIDC_CLIENT_SECRET}}\""""
+      PLASMON_OIDC_CLIENT_SECRET: "${{OIDC_CLIENT_SECRET}}"
+      PLASMON_SMTP_PASSWORD: "${{PLASMON_SMTP_PASSWORD}}\""""
     depends = []
     if with_postgres:
         depends.append("postgres")
@@ -164,6 +165,7 @@ def write_bundle(directory: Path, cfg: ServerConfig, domain: str, storage: str, 
         f"S3_ACCESS_KEY={'plasmon' if with_minio else ''}",
         f"S3_SECRET_KEY={secrets.token_urlsafe(24) if with_minio else ''}",
         "OIDC_CLIENT_SECRET=",
+        "PLASMON_SMTP_PASSWORD=",
         "PLASMON_VERSION=latest",
     ]
     files = {
